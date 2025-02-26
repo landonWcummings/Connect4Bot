@@ -43,7 +43,7 @@ def draw_board(board, screen):
                                    RADIUS)
     pygame.display.update()
 
-def run_game(model):
+def run_game(model, starting_player=-1):
     env = Connect4Env()
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -52,7 +52,7 @@ def run_game(model):
 
     board, _ = env.reset()  # Unpack observation and info
     game_over = False
-    current_player = -1  # Let the human (yellow) go first
+    current_player = starting_player  # Starting player: -1 for human, 1 for agent
 
     draw_board(board, screen)
 
@@ -101,13 +101,16 @@ def run_game(model):
 
 if __name__ == "__main__":
     # Option 1: Pass the model directly (if already defined in your training script)
-    run_game(model)
-    
+    norm = True
+
+    if norm:
+        run_game(model)
+    else:
     # Option 2: Load a pre-trained model from a file.
     # Uncomment the lines below to load a model and play.
-    """from stable_baselines3 import PPO
-    model = PPO.load()
-    run_game(model)"""
+        from stable_baselines3 import PPO
+        model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\ppo_connect4_final.zip")
+        run_game(model, starting_player=1)
     
     # For now, if no model is passed, raise an error:
     # raise ValueError("No model provided. Please pass a model or uncomment the model loading code.")

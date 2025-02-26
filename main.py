@@ -87,7 +87,7 @@ def train_self_play(total_timesteps=100000, update_interval=2000, eval_threshold
         print(f"Trained {timesteps_so_far} timesteps")
         
         # Evaluate the current model over 200 games.
-        win_rate = evaluate_agent(model, num_episodes=200)
+        win_rate = evaluate_agent(model, num_episodes=350)
         games_since_update += 200
         print(f"Evaluation win rate over 200 games: {win_rate*100:.2f}%")
         print(f"Games since last update: {games_since_update}")
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     # # Load the model from a zip file. Ensure the environment is passed.
     trained_model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\ppo_connect4_final.zip", env=env, device="cuda")
     # # Continue training with self-play
-    trained_model = train_self_play(total_timesteps=1000000, update_interval=1000, eval_threshold=0.55, model=trained_model)
+    trained_model = train_self_play(total_timesteps=9900000, update_interval=10000, eval_threshold=0.55, model=trained_model)
     # ------------------------------------------------------
     
     # For now, using Option 1:
