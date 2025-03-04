@@ -144,8 +144,8 @@ if __name__ == "__main__":
     from stable_baselines3 import PPO
     num_envs = 6
     env = SubprocVecEnv([make_env() for _ in range(num_envs)])
-    trained_model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\ppo_connect4_final.zip", env=env, device="cuda")
-    trained_model = train_self_play(total_timesteps=99000000, update_interval=666, eval_threshold=0.47, max_hours=22, model=trained_model)
+    trained_model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\connect4_ensemble_master.zip", env=env, device="cuda")
+    trained_model = train_self_play(total_timesteps=99000000, update_interval=666, eval_threshold=0.51, max_hours=21, model=trained_model)
     
     import game
     game.run_game(trained_model)

@@ -101,7 +101,7 @@ def run_game(model, starting_player=-1):
 
 if __name__ == "__main__":
     # Option 1: Pass the model directly (if already defined in your training script)
-    norm = True
+    norm = False
 
     if norm:
         run_game(model)
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     # Option 2: Load a pre-trained model from a file.
     # Uncomment the lines below to load a model and play.
         from stable_baselines3 import PPO
-        model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\ppo_connect4_final.zip")
+        model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\connect4_ensemble_master.zip")
         run_game(model, starting_player=1)
     
     # For now, if no model is passed, raise an error:
