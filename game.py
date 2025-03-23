@@ -17,14 +17,27 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)      # Agent (player 1)
 YELLOW = (255, 255, 0) # Human (player -1)
 
+def observation_to_board(obs):
+    """Convert a (3, 6, 7) observation to a (6, 7) board."""
+    if obs.ndim == 3:  # (3, 6, 7)
+        board = np.zeros((ROWS, COLS), dtype=np.int8)
+        board[obs[0] == 1] = 1    # Player 1
+        board[obs[1] == 1] = -1   # Player -1
+        # Empty cells (obs[2] == 1) remain 0
+        return board
+    return obs  # If already 2D, return as-is
+
+def board_to_observation(board):
+    """Convert a (6, 7) board to a (3, 6, 7) observation for the model."""
+    obs = np.zeros((3, ROWS, COLS), dtype=np.int8)
+    obs[0] = (board == 1).astype(np.int8)  # Player 1
+    obs[1] = (board == -1).astype(np.int8) # Player -1
+    obs[2] = (board == 0).astype(np.int8)  # Empty
+    return obs
+
 def draw_board(board, screen):
-    # If board is a tuple, extract the observation
-    if isinstance(board, tuple):
-        board = board[0]
-    
-    # If board is 1D (flattened), reshape to 2D
-    if board.ndim == 1:
-        board = board.reshape((ROWS, COLS))
+    # Convert to 2D if necessary
+    board = observation_to_board(board)
     
     # Draw board background and empty slots
     for c in range(COLS):
@@ -48,21 +61,16 @@ def draw_board(board, screen):
     pygame.display.update()
 
 def drop_piece(board, col, player):
-    # If board is 1D, reshape to 2D
-    if board.ndim == 1:
-        board = board.reshape((ROWS, COLS))
-    
+    board = observation_to_board(board)
     new_board = board.copy()
     for row in range(ROWS - 1, -1, -1):
         if new_board[row, col] == 0:
             new_board[row, col] = player
             break
-    return new_board.flatten()  # Return flattened for model compatibility
+    return new_board  # Keep as 2D for game logic
 
 def check_win(player, board):
-    # If board is 1D, reshape to 2D
-    if board.ndim == 1:
-        board = board.reshape((ROWS, COLS))
+    board = observation_to_board(board)
     
     # Horizontal
     for r in range(ROWS):
@@ -87,15 +95,11 @@ def check_win(player, board):
     return False
 
 def is_valid_move(board, col):
-    # If board is 1D, reshape to 2D
-    if board.ndim == 1:
-        board = board.reshape((ROWS, COLS))
+    board = observation_to_board(board)
     return board[0, col] == 0
 
 def get_valid_moves(board):
-    # If board is 1D, reshape to 2D
-    if board.ndim == 1:
-        board = board.reshape((ROWS, COLS))
+    board = observation_to_board(board)
     return [c for c in range(COLS) if board[0, c] == 0]
 
 def run_game(model, starting_player=-1):
@@ -105,7 +109,8 @@ def run_game(model, starting_player=-1):
     pygame.display.set_caption("Connect 4: Play Against PPO Agent")
     clock = pygame.time.Clock()
 
-    board, _ = env.reset()  # Unpack observation and info (board is already flattened)
+    obs, _ = env.reset()  # Get initial (3, 6, 7) observation
+    board = observation_to_board(obs)  # Convert to 2D for game logic
     game_over = False
     current_player = starting_player  # -1 for human, 1 for agent
 
@@ -117,7 +122,7 @@ def run_game(model, starting_player=-1):
                 pygame.quit()
                 sys.exit()
             
-            # Human's turn: on mouse click, determine column
+            # Human's turn
             if current_player == -1 and event.type == pygame.MOUSEBUTTONDOWN:
                 posx = event.pos[0]
                 col = posx // SQUARE_SIZE
@@ -132,7 +137,9 @@ def run_game(model, starting_player=-1):
         
         # Agent's turn
         if current_player == 1 and not game_over:
-            action, _ = model.predict(board)  # Model expects flattened input
+            # Convert 2D board to 3D observation for model
+            obs = board_to_observation(board)
+            action, _ = model.predict(obs)  # Model expects (3, 6, 7)
             valid_moves = get_valid_moves(board)
             if action not in valid_moves:
                 action = np.random.choice(valid_moves)
@@ -155,7 +162,6 @@ def run_game(model, starting_player=-1):
     pygame.quit()
 
 if __name__ == "__main__":
-    # Load a pre-trained model
     from stable_baselines3 import PPO
-    model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\connect4_ensemble_master.zip")
+    model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\connect4_cnn_master.zip")
     run_game(model, starting_player=1)

@@ -49,7 +49,7 @@ class TensorboardCallback(BaseCallback):
     def _on_step(self) -> bool:
         self.step_counter += 1
         # Every 100,000 steps, evaluate against random mover
-        if self.step_counter % 100000 == 0:
+        if self.step_counter % 10000 == 0:
             win_rate = evaluate_agent(self.model, opponent_params=None, num_episodes=100)
             self.writer.add_scalar("WinRate/RandomOpponent", win_rate, self.step_counter)
             print(f"[Tensorboard] Win rate against random mover at {self.step_counter} steps: {win_rate*100:.2f}%")

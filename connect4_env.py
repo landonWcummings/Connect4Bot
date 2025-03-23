@@ -1,7 +1,25 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from stable_baselines3 import PPO
+import torch as th
+import torch.nn as nn
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+
+class CustomConnect4CNN(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim=128):
+        super(CustomConnect4CNN, self).__init__(observation_space, features_dim)
+        self.cnn = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 3 * 4, features_dim),
+            nn.ReLU()
+        )
+
+    def forward(self, observations):
+        return self.cnn(observations)
 
 class Connect4Env(gym.Env):
     metadata = {"render.modes": ["human"]}
@@ -12,8 +30,7 @@ class Connect4Env(gym.Env):
         self.cols = 7
         self.board = np.zeros((self.rows, self.cols), dtype=np.int8)
         self.action_space = spaces.Discrete(self.cols)
-        # MLP-compatible observation space: flattened to (42,)
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(self.rows * self.cols,), dtype=np.int8)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(3, self.rows, self.cols), dtype=np.int8)
         self.done = False
         self.opponent_params = None
         self._temp_opponent_model = None
@@ -25,87 +42,20 @@ class Connect4Env(gym.Env):
     def reset(self, **kwargs):
         self.board = np.zeros((self.rows, self.cols), dtype=np.int8)
         self.done = False
-        # Flatten the board for MLP
-        return self.board.flatten(), {}
+        return self.get_observation(), {}
 
-    def step(self, action):
-        if self.done:
-            return self.board.flatten(), 0, True, False, {}
-
-        # Agent's turn (player = 1)
-        if not self.is_valid_move(action):
-            valid_moves = self.get_valid_moves(self.board)
-            if valid_moves:
-                action = np.random.choice(valid_moves)
-                penalty = -0.5
-            else:
-                self.done = True
-                return self.board.flatten(), -1, True, False, {"invalid_move": True}
-        else:
-            penalty = 0
-
-        opp_pot_before = self.count_potential_wins(-1, self.board)
-        agent_setup_before = self.count_setup_potential(1, self.board)
-        opp_setup_before = self.count_setup_potential(-1, self.board)
-
-        self.board = self.drop_piece(self.board, action, 1)
-
-        reward = penalty
-        if self.check_win(1, self.board):
-            self.done = True
-            return self.board.flatten(), reward + 1, True, False, {}
-
-        opp_pot_after = self.count_potential_wins(-1, self.board)
-        blocking_reward = (opp_pot_before - opp_pot_after) * 0.1
-
-        agent_setup_after = self.count_setup_potential(1, self.board)
-        opp_setup_after = self.count_setup_potential(-1, self.board)
-        setup_reward = (agent_setup_after - agent_setup_before) * 0.1 - (opp_setup_after - opp_setup_before) * 0.1
-
-        reward += blocking_reward + setup_reward
-
-        if not self.get_valid_moves(self.board):
-            self.done = True
-            return self.board.flatten(), reward, True, False, {}
-
-        # Opponent's turn (player = -1)
-        opp_valid_moves = self.get_valid_moves(self.board)
-        if opp_valid_moves:
-            if self.opponent_params is not None:
-                if self._temp_opponent_model is None:
-                    # Use MlpPolicy with large architecture
-                    self._temp_opponent_model = PPO(
-                        "MlpPolicy",
-                        self,
-                        verbose=0,
-                        policy_kwargs=dict(
-                            net_arch=dict(
-                                pi=[2048, 2048, 1024, 512],
-                                vf=[2048, 2048, 1024, 512]
-                            )
-                        )
-                    )
-                self._temp_opponent_model.set_parameters(self.opponent_params)
-                opp_action, _ = self._temp_opponent_model.predict(self.board.flatten())
-                if opp_action not in opp_valid_moves:
-                    opp_action = np.random.choice(opp_valid_moves)
-            else:
-                opp_action = np.random.choice(opp_valid_moves)
-            self.board = self.drop_piece(self.board, opp_action, -1)
-            if self.check_win(-1, self.board):
-                self.done = True
-                return self.board.flatten(), reward - 1, True, False, {}
-
-        if not self.get_valid_moves(self.board):
-            self.done = True
-
-        return self.board.flatten(), reward, self.done, False, {}
+    def get_observation(self):
+        obs = np.zeros((3, self.rows, self.cols), dtype=np.int8)
+        obs[0] = (self.board == 1).astype(np.int8)
+        obs[1] = (self.board == -1).astype(np.int8)
+        obs[2] = (self.board == 0).astype(np.int8)
+        return obs
 
     def is_valid_move(self, col):
-        return self.board[0, col] == 0
+        return 0 <= col < self.cols and self.board[0, col] == 0
 
     def get_valid_moves(self, board):
-        return [c for c in range(self.cols) if board[0, c] == 0]
+        return [col for col in range(self.cols) if board[0, col] == 0]
 
     def drop_piece(self, board, col, player):
         new_board = board.copy()
@@ -118,53 +68,160 @@ class Connect4Env(gym.Env):
     def check_win(self, player, board):
         for r in range(self.rows):
             for c in range(self.cols - 3):
-                if np.all(board[r, c:c+4] == player):
+                if all(board[r, c + i] == player for i in range(4)):
                     return True
-        for c in range(self.cols):
-            for r in range(self.rows - 3):
-                if np.all(board[r:r+4, c] == player):
+        for r in range(self.rows - 3):
+            for c in range(self.cols):
+                if all(board[r + i, c] == player for i in range(4)):
                     return True
         for r in range(self.rows - 3):
             for c in range(self.cols - 3):
-                if all(board[r+i, c+i] == player for i in range(4)):
+                if all(board[r + i, c + i] == player for i in range(4)):
                     return True
         for r in range(3, self.rows):
             for c in range(self.cols - 3):
-                if all(board[r-i, c+i] == player for i in range(4)):
+                if all(board[r - i, c + i] == player for i in range(4)):
                     return True
         return False
 
     def count_potential_wins(self, player, board):
         count = 0
-        for move in self.get_valid_moves(board):
-            temp_board = self.drop_piece(board, move, player)
-            if self.check_win(player, temp_board):
-                count += 1
+        for r in range(self.rows):
+            for c in range(self.cols - 3):
+                window = board[r, c:c + 4]
+                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
+                    count += 1
+        for r in range(self.rows - 3):
+            for c in range(self.cols):
+                window = board[r:r + 4, c]
+                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
+                    count += 1
+        for r in range(self.rows - 3):
+            for c in range(self.cols - 3):
+                window = [board[r + i, c + i] for i in range(4)]
+                if window.count(player) == 3 and window.count(0) == 1:
+                    count += 1
+        for r in range(3, self.rows):
+            for c in range(self.cols - 3):
+                window = [board[r - i, c + i] for i in range(4)]
+                if window.count(player) == 3 and window.count(0) == 1:
+                    count += 1
+        return count
+
+    def count_almost_wins(self, player, board):
+        count = 0
+        for r in range(self.rows):
+            for c in range(self.cols - 3):
+                window = board[r, c:c + 4]
+                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
+                    count += 1
+        for r in range(self.rows - 3):
+            for c in range(self.cols):
+                window = board[r:r + 4, c]
+                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
+                    count += 1
         return count
 
     def count_setup_potential(self, player, board):
         count = 0
         for r in range(self.rows):
             for c in range(self.cols - 3):
-                window = board[r, c:c+4]
-                if np.count_nonzero(window == -player) == 0 and np.count_nonzero(window == player) > 0:
-                    count += 1
-        for c in range(self.cols):
-            for r in range(self.rows - 3):
-                window = board[r:r+4, c]
-                if np.count_nonzero(window == -player) == 0 and np.count_nonzero(window == player) > 0:
-                    count += 1
-        for r in range(self.rows - 3):
-            for c in range(self.cols - 3):
-                window = np.array([board[r+i, c+i] for i in range(4)])
-                if np.count_nonzero(window == -player) == 0 and np.count_nonzero(window == player) > 0:
-                    count += 1
-        for r in range(3, self.rows):
-            for c in range(self.cols - 3):
-                window = np.array([board[r-i, c+i] for i in range(4)])
-                if np.count_nonzero(window == -player) == 0 and np.count_nonzero(window == player) > 0:
+                window = board[r, c:c + 4]
+                if np.sum(window == player) == 2 and np.sum(window == 0) == 2:
                     count += 1
         return count
 
-    def render(self, mode="human"):
-        print(np.flip(self.board, 0))
+    def step(self, action):
+        if self.done:
+            return self.get_observation(), 0, True, False, {}
+
+        if not self.is_valid_move(action):
+            valid_moves = self.get_valid_moves(self.board)
+            if valid_moves:
+                action = np.random.choice(valid_moves)
+                penalty = -0.5
+            else:
+                self.done = True
+                return self.get_observation(), -1, True, False, {"invalid_move": True}
+        else:
+            penalty = 0
+
+        opp_pot_before = self.count_potential_wins(-1, self.board)
+        agent_setup_before = self.count_setup_potential(1, self.board)
+        opp_setup_before = self.count_setup_potential(-1, self.board)
+        agent_almost_wins_before = self.count_almost_wins(1, self.board)
+        opp_almost_wins_before = self.count_almost_wins(-1, self.board)
+
+        self.board = self.drop_piece(self.board, action, 1)
+
+        reward = penalty
+        # Prioritize winning immediately
+        if self.check_win(1, self.board):
+            self.done = True
+            return self.get_observation(), 10, True, False, {}  # High reward for winning
+
+        opp_pot_after = self.count_potential_wins(-1, self.board)
+        blocking_reward = (opp_pot_before - opp_pot_after) * 0.5  # Reduced weight
+
+        agent_setup_after = self.count_setup_potential(1, self.board)
+        opp_setup_after = self.count_setup_potential(-1, self.board)
+        setup_reward = (agent_setup_after - agent_setup_before) * 0.5 - (opp_setup_after - opp_setup_before) * 0.3
+
+        agent_almost_wins_after = self.count_almost_wins(1, self.board)
+        proximity_reward = (agent_almost_wins_after - agent_almost_wins_before) * 0.2
+
+        opp_almost_wins_after = self.count_almost_wins(-1, self.board)
+        opp_progress_penalty = (opp_almost_wins_after - opp_almost_wins_before) * -0.2
+
+        reward += blocking_reward + setup_reward + proximity_reward + opp_progress_penalty
+
+        if not self.get_valid_moves(self.board):
+            self.done = True
+            return self.get_observation(), reward, True, False, {}
+
+        opp_valid_moves = self.get_valid_moves(self.board)
+        if opp_valid_moves:
+            if self.opponent_params is not None and isinstance(self.opponent_params, dict):
+                if self._temp_opponent_model is None:
+                    from stable_baselines3 import PPO
+                    policy_kwargs = dict(
+                        features_extractor_class=CustomConnect4CNN,
+                        features_extractor_kwargs=dict(features_dim=128),
+                        net_arch=[128, 64]
+                    )
+                    self._temp_opponent_model = PPO(
+                        "CnnPolicy",
+                        self,
+                        verbose=0,
+                        policy_kwargs=policy_kwargs
+                    )
+                self._temp_opponent_model.set_parameters(self.opponent_params)
+                opp_action, _ = self._temp_opponent_model.predict(self.get_observation())
+                if opp_action not in opp_valid_moves:
+                    opp_action = self.heuristic_opponent_move() if self.opponent_params == "heuristic" else np.random.choice(opp_valid_moves)
+            elif self.opponent_params == "heuristic":
+                opp_action = self.heuristic_opponent_move()
+            else:
+                opp_action = np.random.choice(opp_valid_moves)
+            self.board = self.drop_piece(self.board, opp_action, -1)
+            if self.check_win(-1, self.board):
+                self.done = True
+                return self.get_observation(), reward - 1, True, False, {}
+
+        if not self.get_valid_moves(self.board):
+            self.done = True
+
+        return self.get_observation(), reward, self.done, False, {}
+
+    def heuristic_opponent_move(self):
+        valid_moves = self.get_valid_moves(self.board)
+        for col in valid_moves:
+            temp_board = self.drop_piece(self.board, col, -1)
+            if self.check_win(-1, temp_board):
+                return col
+            temp_board = self.drop_piece(self.board, col, 1)
+            if self.check_win(1, temp_board):
+                return col
+        if 3 in valid_moves:
+            return 3
+        return np.random.choice(valid_moves)
