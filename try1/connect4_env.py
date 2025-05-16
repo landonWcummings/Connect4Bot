@@ -1,25 +1,6 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-import torch as th
-import torch.nn as nn
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-
-class CustomConnect4CNN(BaseFeaturesExtractor):
-    def __init__(self, observation_space, features_dim=128):
-        super(CustomConnect4CNN, self).__init__(observation_space, features_dim)
-        self.cnn = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=2, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64 * 3 * 4, features_dim),
-            nn.ReLU()
-        )
-
-    def forward(self, observations):
-        return self.cnn(observations)
 
 class Connect4Env(gym.Env):
     metadata = {"render.modes": ["human"]}
@@ -30,7 +11,8 @@ class Connect4Env(gym.Env):
         self.cols = 7
         self.board = np.zeros((self.rows, self.cols), dtype=np.int8)
         self.action_space = spaces.Discrete(self.cols)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(3, self.rows, self.cols), dtype=np.int8)
+        # Flattened observation space for MLP
+        self.observation_space = spaces.Box(low=0, high=1, shape=(self.rows * self.cols * 3,), dtype=np.int8)
         self.done = False
         self.opponent_params = None
         self._temp_opponent_model = None
@@ -49,7 +31,7 @@ class Connect4Env(gym.Env):
         obs[0] = (self.board == 1).astype(np.int8)
         obs[1] = (self.board == -1).astype(np.int8)
         obs[2] = (self.board == 0).astype(np.int8)
-        return obs
+        return obs.flatten()
 
     def is_valid_move(self, col):
         return 0 <= col < self.cols and self.board[0, col] == 0
@@ -109,18 +91,7 @@ class Connect4Env(gym.Env):
         return count
 
     def count_almost_wins(self, player, board):
-        count = 0
-        for r in range(self.rows):
-            for c in range(self.cols - 3):
-                window = board[r, c:c + 4]
-                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
-                    count += 1
-        for r in range(self.rows - 3):
-            for c in range(self.cols):
-                window = board[r:r + 4, c]
-                if np.sum(window == player) == 3 and np.sum(window == 0) == 1:
-                    count += 1
-        return count
+        return self.count_potential_wins(player, board)
 
     def count_setup_potential(self, player, board):
         count = 0
@@ -155,13 +126,12 @@ class Connect4Env(gym.Env):
         self.board = self.drop_piece(self.board, action, 1)
 
         reward = penalty
-        # Prioritize winning immediately
         if self.check_win(1, self.board):
             self.done = True
-            return self.get_observation(), 10, True, False, {}  # High reward for winning
+            return self.get_observation(), 10, True, False, {}
 
         opp_pot_after = self.count_potential_wins(-1, self.board)
-        blocking_reward = (opp_pot_before - opp_pot_after) * 0.5  # Reduced weight
+        blocking_reward = (opp_pot_before - opp_pot_after) * 0.5
 
         agent_setup_after = self.count_setup_potential(1, self.board)
         opp_setup_after = self.count_setup_potential(-1, self.board)
@@ -184,16 +154,9 @@ class Connect4Env(gym.Env):
             if self.opponent_params is not None and isinstance(self.opponent_params, dict):
                 if self._temp_opponent_model is None:
                     from stable_baselines3 import PPO
-                    policy_kwargs = dict(
-                        features_extractor_class=CustomConnect4CNN,
-                        features_extractor_kwargs=dict(features_dim=128),
-                        net_arch=[128, 64]
-                    )
                     self._temp_opponent_model = PPO(
-                        "CnnPolicy",
-                        self,
-                        verbose=0,
-                        policy_kwargs=policy_kwargs
+                        "MlpPolicy", self, verbose=0,
+                        policy_kwargs=dict(net_arch=[128, 64])
                     )
                 self._temp_opponent_model.set_parameters(self.opponent_params)
                 opp_action, _ = self._temp_opponent_model.predict(self.get_observation())

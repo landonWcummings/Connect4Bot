@@ -109,10 +109,10 @@ def run_game(model, starting_player=-1):
     pygame.display.set_caption("Connect 4: Play Against PPO Agent")
     clock = pygame.time.Clock()
 
-    obs, _ = env.reset()  # Get initial (3, 6, 7) observation
-    board = observation_to_board(obs)  # Convert to 2D for game logic
+    obs, _ = env.reset()
+    board = observation_to_board(obs.reshape(3, 6, 7))
     game_over = False
-    current_player = starting_player  # -1 for human, 1 for agent
+    current_player = starting_player
 
     draw_board(board, screen)
 
@@ -121,8 +121,7 @@ def run_game(model, starting_player=-1):
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            
-            # Human's turn
+
             if current_player == -1 and event.type == pygame.MOUSEBUTTONDOWN:
                 posx = event.pos[0]
                 col = posx // SQUARE_SIZE
@@ -134,12 +133,11 @@ def run_game(model, starting_player=-1):
                         game_over = True
                     current_player = 1
                     draw_board(board, screen)
-        
-        # Agent's turn
+
         if current_player == 1 and not game_over:
-            # Convert 2D board to 3D observation for model
             obs = board_to_observation(board)
-            action, _ = model.predict(obs)  # Model expects (3, 6, 7)
+            obs_flat = obs.flatten().astype(np.float32)
+            action, _ = model.predict(obs_flat.reshape(1, -1), deterministic=True)
             valid_moves = get_valid_moves(board)
             if action not in valid_moves:
                 action = np.random.choice(valid_moves)
@@ -150,18 +148,20 @@ def run_game(model, starting_player=-1):
                 game_over = True
             current_player = -1
             draw_board(board, screen)
-        
+
+
+
         # Check for draw
         if len(get_valid_moves(board)) == 0 and not game_over:
             print("It's a draw!")
             game_over = True
-        
+
         clock.tick(30)
-    
+
     pygame.time.wait(3000)
     pygame.quit()
 
 if __name__ == "__main__":
     from stable_baselines3 import PPO
-    model = PPO.load(r"C:\Users\lndnc\OneDrive\Desktop\AI\connect4\connect4_cnn_master.zip")
+    model = PPO.load(r"C:\Users\lando\Desktop\AI\Connect4Bot\models_sequential\ppo_vs_minimax_m3.25.zip")
     run_game(model, starting_player=1)

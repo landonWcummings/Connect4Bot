@@ -1,0 +1,59 @@
+import numpy as np
+import torch
+from stable_baselines3 import PPO
+import onnx
+import os
+
+# Path to the trained PPO model
+MPATH = r"C:\Users\lando\Desktop\AI\Connect4Bot\models_sequential\ppo_vs_minimax_m4.15.zip"
+
+# Output path for the ONNX model
+OUTPUT_PATH = r"C:\Users\lando\Desktop\AI\Connect4Bot\final.onnx"
+
+# Define observation shape (3 channels x 6 rows x 7 cols = 126 elements)
+OBS_SHAPE = (126,)
+
+def flatten_obs_dummy():
+    """Create a dummy observation for tracing the model."""
+    # Simulate a 6x7 board with all empty cells
+    board = np.zeros((6, 7), dtype=np.int8)
+    obs = np.zeros((3, 6, 7), dtype=np.int8)
+    obs[2] = 1  # Empty channel: all cells are empty
+    return obs.ravel().astype(np.float32)
+
+if __name__ == "__main__":
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+
+    # Load the PPO model
+    print(f"Loading PPO model from {MPATH}...")
+    model = PPO.load(MPATH, device='cpu')
+
+    # Extract the policy network
+    policy = model.policy
+    policy.eval()  # Set to evaluation mode
+
+    # Create dummy input for ONNX export
+    dummy_input = torch.tensor(flatten_obs_dummy(), dtype=torch.float32).unsqueeze(0)  # Shape: (1, 126)
+
+    # Export the policy network to ONNX
+    print(f"Exporting policy network to ONNX at {OUTPUT_PATH}...")
+    torch.onnx.export(
+        policy,                          # Model to export
+        dummy_input,                     # Dummy input tensor
+        OUTPUT_PATH,                     # Output ONNX file path
+        input_names=["observation"],     # Name of input node
+        output_names=["action_logits"],  # Name of output node
+        dynamic_axes={
+            "observation": {0: "batch"}, # Allow variable batch size
+            "action_logits": {0: "batch"}
+        },
+        opset_version=11,                # ONNX opset version
+        do_constant_folding=True         # Optimize constants
+    )
+
+    # Verify the ONNX model
+    print("Verifying ONNX model...")
+    onnx_model = onnx.load(OUTPUT_PATH)
+    onnx.checker.check_model(onnx_model)
+    print(f"ONNX model successfully saved to {OUTPUT_PATH}")
